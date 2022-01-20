@@ -1,0 +1,67 @@
+pipeline {
+    agent {
+        label 'worker1'
+    }
+    options { timestamps () }
+    stages {
+        stage('Clone repo') {
+            steps {
+                git branch: 'main', url: 'https://github.com/lek-x/demo'
+            }
+        }
+        stage('Preparing after checkout'){
+                steps{
+                    sh 'sudo rm -f .env'
+                    sh "sudo ln -T /home/jenkins/project_sys/.env ${WORKSPACE}/.env"
+                    sh 'chown -R jenkins:jenkins *'
+                    sh 'cd /bin'
+                    sh 'composer install'
+                    sh 'mkdir -p /var/www/site/ '
+                }
+        }
+        stage("Copy to /var/www/"){
+            steps{
+                sh "sudo cp -r ${WORKSPACE}/ /var/www/site/"
+                sh 'sudo mv /var/www/site/${JOB_NAME} /var/www/site/build-${BUILD_NUMBER}/'
+                sh 'sudo rm -f /var/www/site/build-${BUILD_NUMBER}/.env'
+            }
+        }
+        stage("Deploying app"){
+            steps{
+                sh "sudo ln -sfT /var/www/site/build-${BUILD_NUMBER}/ /var/www/mysite"
+                sh "sudo ln -T /home/jenkins/project_sys/.env /var/www/site/build-${BUILD_NUMBER}/.env"
+                sh "sudo chown -R www-data:www-data /var/www/site/build-${BUILD_NUMBER}/"
+            }
+        }
+        stage("Reloading NGINX"){
+            steps{
+                sh "sudo nginx -s reload"
+            }
+        }
+        stage("Clean old builds"){
+            steps{
+                sh(script:'''#!/bin/bash
+                    cd /var/www/site
+                    list_dir=( * )
+                    iter=${#list_dir[@]}
+                    #echo $iter
+                    if [[ $iter -ge 4 ]]
+                    then
+                        for i in ${list_dir[@]:0:1}
+                        do
+                        echo  "$i was deleted"
+                        sudo rm -r -f $i
+                        done
+                    elif [[ $iter -le 3 ]]
+                    then
+                    echo "Nothing to delete"
+                    else
+                    echo "hmmmm"
+                    fi
+                '''.stripIndent())
+                
+            }
+        }
+            
+    }
+}
